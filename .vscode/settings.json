@@ -1,0 +1,8 @@
+{
+    "autoDocstring.docstringFormat": "numpy",
+    "autoDocstring.guessTypes": true,
+    "autoDocstring.quoteStyle": "\"\"\"",
+    "cSpell.words": [
+        "abcm"
+    ]
+}
