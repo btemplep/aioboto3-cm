@@ -5,7 +5,7 @@ nox.options.sessions = [
     "unit-tests-py"
 ]
 
-@nox.session(name="publish-package")
+@nox.session(name="publish")
 def publish_package(session: nox.Session):
     """Build a new src dist and wheel, then publish to PYPI.
     """
@@ -15,7 +15,7 @@ def publish_package(session: nox.Session):
         external=True
     )
     session.run("python", "-m", "build", "--sdist", "--wheel")
-    session.run("twine", "upload", "dist/*", "--repository", "boto3-assume")
+    session.run("twine", "upload", "dist/*", "--repository", "aioboto3-cm")
 
 
 @nox.session(
@@ -27,7 +27,7 @@ def unit_tests_current_python(session: nox.Session):
     """Run the unit tests in the current venv and generate html coverage report at ./htmlcov/index.html
     """
     session.run("coverage", "erase")
-    session.run("pytest", "-vvv", "--cov=src/boto3_assume", "--cov-report", "term", "--cov-report", "html", "tests/unit")
+    session.run("pytest", "-vvv", "--cov=src/aioboto3_cm", "--cov-report", "term", "--cov-report", "html", "tests/unit")
 
 
 @nox.session(
@@ -45,7 +45,7 @@ def unit_tests(session: nox.Session):
     """
     dev_venv_setup(session=session)
     session.run("coverage", "erase")
-    session.run("pytest", "-vvv", "--cov=src/boto3_assume", "--cov-report", "term-missing", "tests/unit")
+    session.run("pytest", "-vvv", "--cov=src/aioboto3_cm", "--cov-report", "term-missing", "tests/unit")
 
 
 @nox.session(name="dev-venv")

@@ -32,10 +32,10 @@ __all__ = [
     "SessionNotFoundError"
 ]
 
-__version__ = "0.1.0rc1"
+__version__ = "0.1.0rc2"
 
 
-from aioboto3_cm.cm import AIOBoto3CM
+from aioboto3_cm.aioboto3_cm import AIOBoto3CM
 from aioboto3_cm.exceptions import (
     AIOBoto3CMError,
     SessionConflictError,

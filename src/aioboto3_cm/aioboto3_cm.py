@@ -1,4 +1,4 @@
-"""See AIOBoto3CM
+"""See the ``AIOBoto3CM`` class.
 """
 
 __all__ = [
@@ -103,6 +103,33 @@ class AIOBoto3CM:
             "session": session,
             "groups": {}
         }
+    
+
+    def get_session(self, abcm_session_name: str | None=None) -> aioboto3.Session:
+        """Retrieve an existing session by name. 
+
+        Parameters
+        ----------
+        abcm_session_name : str
+            Name of the session to retrieve.
+
+        Returns
+        -------
+        aioboto3.Session
+            Names session.
+        
+        Raises
+        ------
+        aioboto3_cm.exceptions.SessionNotFoundError
+            Session not found.
+        """
+        try:
+            return self._client_lut[abcm_session_name]['session']
+        except KeyError as exc:
+            if abcm_session_name is None:
+                raise SessionNotFoundError(f"The default session has not been created yet. You must either register a default session or create a client under the default session first.") from exc 
+               
+            raise SessionNotFoundError(f"Session name '{abcm_session_name}' is not registered.") from exc
 
 
     def _get_client_arg(self, arg_name: str, arg_value: Any, default_value: Any) -> Any:
@@ -110,7 +137,7 @@ class AIOBoto3CM:
             return self._default_client_kwargs.get(arg_name, default_value)
             
         return arg_value
-
+        
     
     async def client(
         self,
@@ -162,9 +189,10 @@ class AIOBoto3CM:
         aws_account_id : str, default=None
             The account id to use when creating the client. Same semantics as aws_access_key_id above.
         abcm_session_name : str | None, default=None
-            Name of the registered session to create the client with. 
+            Name of the registered session to create or retrieve the client under. 
         abcm_client_group : str | None, default=None
-            Name of the client group to keep the client under. 
+            Name of the client group to create or retrieve the client under. 
+            Creates a new group if the given one does not exist. 
 
         Returns
         -------
@@ -182,7 +210,20 @@ class AIOBoto3CM:
         except KeyError:
             pass
         
-        # if cache miss, then lock whole LUT read and write so that we can check/create the path for the client
+        client_kwargs = {
+            "service_name": service_name,
+            "region_name": self._get_client_arg("region_name", region_name, None),
+            "api_version": self._get_client_arg("api_version", api_version, None),
+            "use_ssl": self._get_client_arg("use_ssl", use_ssl, True),
+            "verify": self._get_client_arg("verify", verify, None),
+            "endpoint_url": self._get_client_arg("endpoint_url", endpoint_url, None),
+            "aws_access_key_id": self._get_client_arg("aws_access_key_id", aws_access_key_id, None),
+            "aws_secret_access_key": self._get_client_arg("aws_secret_access_key", aws_secret_access_key, None),
+            "aws_session_token": self._get_client_arg("aws_session_token", aws_session_token, None),
+            "config": self._get_client_arg("config", config, None),
+            "aws_account_id": self._get_client_arg("aws_account_id", aws_account_id, None)
+        }
+        # if cache miss, then lock LUT on read and write so that we can check/create the path for the client
         await self._lock.acquire()
         # After acquiring lock, check to see if client is created or being created
         if (
@@ -191,18 +232,26 @@ class AIOBoto3CM:
             and region_name in self._client_lut[abcm_session_name]['groups'][abcm_client_group]
             and service_name in self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name]
         ):
-            # When we got the lock, the client was already created
+            # When the client was already created while we waited for the lock
             if "client" in self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name]:
                 self._lock.release()
                 return self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name]['client']
-            # The client is being created, so if we wait for the client lock, then it will be done. 
+            # When the client is being created, so if we wait for the client lock, then it will be done. 
             else: 
                 self._lock.release()
                 client_lock: asyncio.Lock = self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name]['lock']
                 await client_lock.acquire()
                 client_lock.release()
 
-                return self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name]['client']
+                # if that fails then we will retry to make our own client
+                try:
+                    return self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name]['client']
+                except KeyError:
+                    return await self.client(
+                        **client_kwargs,
+                        abcm_session_name=abcm_session_name,
+                        abcm_client_group=abcm_client_group
+                    )
         
         if abcm_session_name not in self._client_lut:
             if abcm_session_name is None:
@@ -217,11 +266,11 @@ class AIOBoto3CM:
         if abcm_client_group not in self._client_lut[abcm_session_name]['groups']:
             self._client_lut[abcm_session_name]['groups'][abcm_client_group] = {}
     
-        # If it's a bad region name, just leave it anyway.  No good way to clean up. 
+        # If it's a bad region name, just leave it anyway 
         if region_name not in self._client_lut[abcm_session_name]['groups'][abcm_client_group]:
             self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name] = {}
         
-        # At this point we can assume the rest of the path is created and we just need to create the client
+        # At this point, the rest of the path exists besides the service and client
         client_lock = asyncio.Lock()
         await client_lock.acquire()
         self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name] = {
@@ -229,21 +278,14 @@ class AIOBoto3CM:
         }
         self._lock.release()
         aes = AsyncExitStack() 
-        new_client = await aes.enter_async_context(
-                self._client_lut[abcm_session_name]['session'].client(
-                    service_name=service_name,
-                    region_name=self._get_client_arg("region_name", region_name, None),
-                    api_version=self._get_client_arg("api_version", api_version, None),
-                    use_ssl=self._get_client_arg("use_ssl", use_ssl, True),
-                    verify=self._get_client_arg("verify", verify, None),
-                    endpoint_url=self._get_client_arg("endpoint_url", endpoint_url, None),
-                    aws_access_key_id=self._get_client_arg("aws_access_key_id", aws_access_key_id, None),
-                    aws_secret_access_key=self._get_client_arg("aws_secret_access_key", aws_secret_access_key, None),
-                    aws_session_token=self._get_client_arg("aws_session_token", aws_session_token, None),
-                    config=self._get_client_arg("config", config, None),
-                    aws_account_id=self._get_client_arg("aws_account_id", aws_account_id, None)
+        try:
+            new_client = await aes.enter_async_context(
+                self._client_lut[abcm_session_name]['session'].client(**client_kwargs)
             )
-        )
+        except Exception:
+            self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name].pop(service_name)
+            client_lock.release()  
+        
         self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name] = {
             "aes": aes,
             "client": new_client
@@ -262,6 +304,9 @@ class AIOBoto3CM:
     ) -> None:
         """Close a single client if it exists, or else do nothing.
 
+        Preserves sessions, and client groups.
+        Does not close clients that are in the process of being created.
+
         Parameters
         ----------
         service_name : str
@@ -279,7 +324,7 @@ class AIOBoto3CM:
             try:
                 if "lock" not in self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name]:
                     service = self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name].pop(service_name)
-            except ValueError:
+            except KeyError:
                 pass
         
         if service is not None:
@@ -289,16 +334,24 @@ class AIOBoto3CM:
     async def close_all(self) -> None:
         """Close all clients. 
 
-        Preserves sessions and client groups. 
+        Preserves sessions, and client groups.
+        Does not close clients that are in the process of being created.
         """
-        tasks = []
-        for session_name in self._client_lut:
-            for group in self._client_lut[session_name]['groups']:
-                for region in self._client_lut[session_name]['groups'][group]:
-                    for service in self._client_lut[session_name]['groups'][group][region]:
-                        tasks.append(
-                            asyncio.create_task(self.close(service, region, session_name, group))
-                        )
+        close_services = []
+        async with self._lock:
+            for session_name in self._client_lut:
+                for group in self._client_lut[session_name]['groups']:
+                    for region in self._client_lut[session_name]['groups'][group]:
+                        keep_services = {}
+                        for service in self._client_lut[session_name]['groups'][group][region]:
+                            if "lock" in self._client_lut[session_name]['groups'][group][region][service]:
+                                keep_services[service] = self._client_lut[session_name]['groups'][group][region][service]
+                            else:
+                                close_services.append(
+                                    self._client_lut[session_name]['groups'][group][region][service]
+                                )
+
+                        self._client_lut[session_name]['groups'][group][region] = keep_services
         
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*[s['aes'].aclose() for s in close_services])
 
