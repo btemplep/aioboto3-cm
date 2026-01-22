@@ -135,10 +135,12 @@ abcm = AIOBoto3CM()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Nothing needed for startup. You could prefill sessions or clients...
-    yield
-    # Clean up all clients before exiting
-    await abcm.close_all()
+    try:
+        # Nothing needed for startup. You could prefill sessions or clients...
+        yield
+    finally:
+        # Clean up all clients before exiting
+        await abcm.close_all()
 
 
 app = FastAPI(lifespan=lifespan)
