@@ -284,7 +284,8 @@ class AIOBoto3CM:
             )
         except Exception:
             self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name].pop(service_name)
-            client_lock.release()  
+            client_lock.release()
+            raise
         
         self._client_lut[abcm_session_name]['groups'][abcm_client_group][region_name][service_name] = {
             "aes": aes,

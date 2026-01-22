@@ -184,11 +184,8 @@ async def test_client_default_kwargs() -> None:
     assert sts_client_defaults.meta.config.region_name == config.region_name
 
 
-@asynccontextmanager
-async def _fake_client(*args, **kwargs):
-    await asyncio.sleep(1)
-
-    yield None
+class MyException(Exception):
+    pass
 
 
 async def test_client_aioboto3_fail_exception(
@@ -197,8 +194,8 @@ async def test_client_aioboto3_fail_exception(
 ) -> None:
     sess = aioboto3.Session()
     abcm.register_session(sess)
-    with patch.object(sess, "client", side_effect=Exception("something went wrong")):
-        with pytest.raises(Exception):
+    with patch.object(sess, "client", side_effect=MyException("something went wrong")):
+        with pytest.raises(MyException):
             await abcm.client("sts")
     
     sts_client = await abcm.client("sts", region_name="us-east-1", endpoint_url=moto_server)
@@ -323,8 +320,8 @@ async def test_client_both_create_failed(
     await asyncio.sleep(1)
     abcm._client_lut[None]['groups'][None][None].pop("sts")
     client_lock.release()
-    with patch.object(sess, "client", side_effect=Exception("something went wrong")):
-        with pytest.raises(Exception):
+    with patch.object(sess, "client", side_effect=MyException("something went wrong")):
+        with pytest.raises(MyException):
             await task
     
     # This is 3 because it tries to create the client over again

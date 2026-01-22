@@ -60,7 +60,7 @@ def sts_arn() -> str:
 
 
 @pytest.fixture(scope="function")
-async def abcm() -> AsyncGenerator[str, None, None]:
+async def abcm() -> AsyncGenerator[str, None]:
     _abcm = AIOBoto3CM()
     yield _abcm
 
@@ -68,7 +68,7 @@ async def abcm() -> AsyncGenerator[str, None, None]:
 
 
 @pytest.fixture(scope="function")
-async def sts_client(moto_server: str, abcm: AIOBoto3CM) -> AsyncGenerator[Any, None, None]:
+async def sts_client(moto_server: str, abcm: AIOBoto3CM) -> AsyncGenerator[Any, None]:
     sts_client = await abcm.client("sts", region_name="us-east-1", endpoint_url=moto_server)
     
     yield sts_client
